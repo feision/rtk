@@ -96,9 +96,12 @@ enum Commands {
         /// Files to read (supports multiple, like cat)
         #[arg(required = true, num_args = 1..)]
         files: Vec<PathBuf>,
-        /// Filter: none (default, full content), minimal, aggressive
+        /// Filter: none, minimal, aggressive. Default auto-selects by language (none for data, minimal for code).
         #[arg(short, long, default_value = "none")]
         level: core::filter::FilterLevel,
+        /// Show full content without compact transformations (blank line collapse / import folding)
+        #[arg(long)]
+        full: bool,
         /// Max lines
         #[arg(short, long, conflicts_with = "tail_lines")]
         max_lines: Option<usize>,
@@ -1503,6 +1506,7 @@ fn run_cli() -> Result<i32> {
         Commands::Read {
             files,
             level,
+            full,
             max_lines,
             tail_lines,
             line_numbers,
@@ -1516,11 +1520,12 @@ fn run_cli() -> Result<i32> {
                         continue;
                     }
                     stdin_seen = true;
-                    read::run_stdin(level, max_lines, tail_lines, line_numbers, cli.verbose)
+                    read::run_stdin(level, !full, max_lines, tail_lines, line_numbers, cli.verbose)
                 } else {
                     read::run(
                         file,
                         level,
+                        !full,
                         max_lines,
                         tail_lines,
                         line_numbers,
