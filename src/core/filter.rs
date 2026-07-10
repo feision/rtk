@@ -370,7 +370,11 @@ pub fn compact_content(content: &str, lang: &Language) -> String {
         // Flush import counter when a non-import line is encountered
         if import_count > 1 {
             let label = if import_is_use { "use" } else { "import" };
-            result.push_str(&format!("// +{} adjacent {} lines\n", import_count - 1, label));
+            result.push_str(&format!(
+                "// +{} adjacent {} lines\n",
+                import_count - 1,
+                label
+            ));
         }
         import_count = 0;
 
@@ -380,7 +384,11 @@ pub fn compact_content(content: &str, lang: &Language) -> String {
     // Flush trailing import counter
     if import_count > 1 {
         let label = if import_is_use { "use" } else { "import" };
-        result.push_str(&format!("// +{} adjacent {} lines\n", import_count - 1, label));
+        result.push_str(&format!(
+            "// +{} adjacent {} lines\n",
+            import_count - 1,
+            label
+        ));
     }
 
     result.trim_end().to_string()
