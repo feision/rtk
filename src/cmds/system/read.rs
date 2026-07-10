@@ -7,9 +7,20 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
 
+/// Determine best default filter level based on language.
+/// Known code languages → Minimal (strip comments, normalize blanks).
+/// Data/Unknown → None (preserve everything).
+pub fn default_level_for_lang(lang: &Language) -> FilterLevel {
+    match lang {
+        Language::Data | Language::Unknown => FilterLevel::None,
+        _ => FilterLevel::Minimal,
+    }
+}
+
 pub fn run(
     file: &Path,
     level: FilterLevel,
+    compact: bool,
     max_lines: Option<usize>,
     tail_lines: Option<usize>,
     line_numbers: bool,
@@ -17,8 +28,30 @@ pub fn run(
 ) -> Result<()> {
     let timer = tracking::TimedExecution::start();
 
+    // Resolve effective level: if user left default (None), auto-select by language
+    let effective_level = if level == FilterLevel::None {
+        let lang = file
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(Language::from_extension)
+            .unwrap_or(Language::Unknown);
+        lang
+    } else {
+        Language::Unknown // doesn't matter, won't be used
+    };
+    let resolved_level = if level == FilterLevel::None {
+        default_level_for_lang(&effective_level)
+    } else {
+        level
+    };
+
     if verbose > 0 {
-        eprintln!("Reading: {} (filter: {})", file.display(), level);
+        eprintln!(
+            "Reading: {} (filter: {}, compact: {})",
+            file.display(),
+            resolved_level,
+            compact
+        );
     }
 
     // Read file content
@@ -37,8 +70,13 @@ pub fn run(
     }
 
     // Apply filter
-    let filter = filter::get_filter(level);
+    let filter = filter::get_filter(resolved_level);
     let mut filtered = filter.filter(&content, &lang);
+
+    // Apply compact transformations (blank line collapse + import folding)
+    if compact {
+        filtered = filter::compact_content(&filtered, &lang);
+    }
 
     // Safety: if filter emptied a non-empty file, fall back to raw content
     if filtered.trim().is_empty() && !content.trim().is_empty() {
@@ -87,6 +125,7 @@ pub fn run(
 
 pub fn run_stdin(
     level: FilterLevel,
+    compact: bool,
     max_lines: Option<usize>,
     tail_lines: Option<usize>,
     line_numbers: bool,
@@ -96,8 +135,17 @@ pub fn run_stdin(
 
     let timer = tracking::TimedExecution::start();
 
+    let resolved_level = if level == FilterLevel::None {
+        FilterLevel::None // stdin has no extension → keep as-is
+    } else {
+        level
+    };
+
     if verbose > 0 {
-        eprintln!("Reading from stdin (filter: {})", level);
+        eprintln!(
+            "Reading from stdin (filter: {}, compact: {})",
+            resolved_level, compact
+        );
     }
 
     // Read from stdin
@@ -115,8 +163,13 @@ pub fn run_stdin(
     }
 
     // Apply filter
-    let filter = filter::get_filter(level);
+    let filter = filter::get_filter(resolved_level);
     let mut filtered = filter.filter(&content, &lang);
+
+    // Apply compact transformations
+    if compact {
+        filtered = filter::compact_content(&filtered, &lang);
+    }
 
     if verbose > 0 {
         let original_lines = content.lines().count();
@@ -203,7 +256,7 @@ fn main() {{
         )?;
 
         // Just verify it doesn't panic
-        run(file.path(), FilterLevel::Minimal, None, None, false, 0)?;
+        run(file.path(), FilterLevel::Minimal, true, None, None, false, 0)?;
         Ok(())
     }
 

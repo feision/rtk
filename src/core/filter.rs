@@ -320,6 +320,80 @@ pub fn get_filter(level: FilterLevel) -> Box<dyn FilterStrategy> {
     }
 }
 
+/// Compact code content: fold consecutive imports + collapse 3+ blank lines to 1.
+/// Deterministic (pure fn of content) — safe for prompt cache.
+pub fn compact_content(content: &str, lang: &Language) -> String {
+    if *lang == Language::Data || *lang == Language::Unknown {
+        // For data/unknown, just strip trailing whitespace on each line
+        let mut result = String::with_capacity(content.len());
+        for line in content.lines() {
+            result.push_str(line.trim_end());
+            result.push('\n');
+        }
+        return result;
+    }
+
+    lazy_static! {
+        static ref IMPORT_RE: Regex =
+            Regex::new(r"^(use |import |from |require\(|#include|#import|export )").unwrap();
+    }
+
+    let mut result = String::with_capacity(content.len());
+    let mut import_count = 0;
+    let mut import_is_use = false;
+    let mut blank_count = 0;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+
+        // Track blank lines — collapse 2+ consecutive to 1 blank line
+        if trimmed.is_empty() {
+            blank_count += 1;
+            if blank_count >= 2 {
+                continue; // skip excess blank lines
+            }
+            result.push('\n');
+            continue;
+        }
+        blank_count = 0;
+
+        // Fold consecutive import/use/require/include lines
+        if IMPORT_RE.is_match(trimmed) {
+            import_count += 1;
+            if import_count == 1 {
+                import_is_use = trimmed.starts_with("use ");
+                result.push_str(line);
+                result.push('\n');
+            }
+            continue;
+        }
+        // Flush import counter when a non-import line is encountered
+        if import_count > 1 {
+            let label = if import_is_use { "use" } else { "import" };
+            result.push_str(&format!(
+                "// +{} adjacent {} lines\n",
+                import_count - 1,
+                label
+            ));
+        }
+        import_count = 0;
+
+        result.push_str(line);
+        result.push('\n');
+    }
+    // Flush trailing import counter
+    if import_count > 1 {
+        let label = if import_is_use { "use" } else { "import" };
+        result.push_str(&format!(
+            "// +{} adjacent {} lines\n",
+            import_count - 1,
+            label
+        ));
+    }
+
+    result.trim_end().to_string()
+}
+
 pub fn smart_truncate(content: &str, max_lines: usize, _lang: &Language) -> String {
     let lines: Vec<&str> = content.lines().collect();
     if lines.len() <= max_lines {
@@ -546,5 +620,53 @@ fn main() {
         let input = "a\nb\nc";
         let output = smart_truncate(input, 3, &Language::Unknown);
         assert_eq!(output, input);
+    }
+
+    // --- compact_content ---
+
+    #[test]
+    fn test_compact_content_collapses_blank_lines() {
+        let input = "a\n\n\n\n\nb\n\n\n\nc";
+        let result = compact_content(input, &Language::Rust);
+        // 2+ consecutive blanks → 1 blank line
+        assert!(result.contains("\n\nb"), "3+ blanks collapsed to 1");
+        assert!(result.contains("\n\nc"), "4+ blanks collapsed to 1");
+        assert!(!result.contains("\n\n\n"), "no triple blanks remain");
+    }
+
+    #[test]
+    fn test_compact_content_folds_imports() {
+        let input = "use std::fs;\nuse std::path;\nuse std::io;\n\nfn main() {}";
+        let result = compact_content(input, &Language::Rust);
+        assert!(result.contains("// +2 adjacent use lines"));
+        assert!(result.contains("use std::fs;"));
+    }
+
+    #[test]
+    fn test_compact_content_data_passthrough() {
+        let input = "{\n  \"key\": \"value\"\n\n\n\n}\n";
+        let result = compact_content(input, &Language::Data);
+        // Data format: only trim trailing whitespace, no import folding
+        assert!(!result.contains("adjacent"), "data should not fold imports");
+        assert!(result.contains("key"), "data content preserved");
+    }
+
+    #[test]
+    fn test_compact_content_single_import_no_fold() {
+        let input = "use std::fs;\n\nfn main() {}";
+        let result = compact_content(input, &Language::Rust);
+        assert!(!result.contains("adjacent"));
+        assert!(result.contains("use std::fs;"));
+    }
+
+    #[test]
+    fn test_compact_content_cache_deterministic() {
+        let input = "use a;\nuse b;\nuse c;\n\n\n\nfn x() {}\nfn y() {}\n\n\nfn z() {}";
+        let r1 = compact_content(input, &Language::Rust);
+        let r2 = compact_content(input, &Language::Rust);
+        assert_eq!(
+            r1, r2,
+            "compact_content must be deterministic for cache safety"
+        );
     }
 }
