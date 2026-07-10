@@ -340,15 +340,16 @@ pub fn compact_content(content: &str, lang: &Language) -> String {
 
     let mut result = String::with_capacity(content.len());
     let mut import_count = 0;
+    let mut import_is_use = false;
     let mut blank_count = 0;
 
     for line in content.lines() {
         let trimmed = line.trim();
 
-        // Track blank lines — collapse 3+ consecutive to 1
+        // Track blank lines — collapse 2+ consecutive to 1 blank line
         if trimmed.is_empty() {
             blank_count += 1;
-            if blank_count >= 3 {
+            if blank_count >= 2 {
                 continue; // skip excess blank lines
             }
             result.push('\n');
@@ -360,6 +361,7 @@ pub fn compact_content(content: &str, lang: &Language) -> String {
         if IMPORT_RE.is_match(trimmed) {
             import_count += 1;
             if import_count == 1 {
+                import_is_use = trimmed.starts_with("use ");
                 result.push_str(line);
                 result.push('\n');
             }
@@ -367,7 +369,12 @@ pub fn compact_content(content: &str, lang: &Language) -> String {
         }
         // Flush import counter when a non-import line is encountered
         if import_count > 1 {
-            result.push_str(&format!("// +{} adjacent {} lines\n", import_count - 1, if trimmed.starts_with("use ") { "use" } else { "import" }));
+            let label = if import_is_use { "use" } else { "import" };
+            result.push_str(&format!(
+                "// +{} adjacent {} lines\n",
+                import_count - 1,
+                label
+            ));
         }
         import_count = 0;
 
@@ -376,7 +383,8 @@ pub fn compact_content(content: &str, lang: &Language) -> String {
     }
     // Flush trailing import counter
     if import_count > 1 {
-        result.push_str(&format!("// +{} adjacent import lines\n", import_count - 1));
+        let label = if import_is_use { "use" } else { "import" };
+        result.push_str(&format!("// +{} adjacent {} lines\n", import_count - 1, label));
     }
 
     result.trim_end().to_string()
@@ -616,7 +624,7 @@ fn main() {
     fn test_compact_content_collapses_blank_lines() {
         let input = "a\n\n\n\n\nb\n\n\n\nc";
         let result = compact_content(input, &Language::Rust);
-        // 3+ consecutive blanks → 1 blank line; 2 consecutive blanks preserved
+        // 2+ consecutive blanks → 1 blank line
         assert!(result.contains("\n\nb"), "3+ blanks collapsed to 1");
         assert!(result.contains("\n\nc"), "4+ blanks collapsed to 1");
         assert!(!result.contains("\n\n\n"), "no triple blanks remain");
