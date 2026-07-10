@@ -384,7 +384,11 @@ pub fn compact_content(content: &str, lang: &Language) -> String {
     // Flush trailing import counter
     if import_count > 1 {
         let label = if import_is_use { "use" } else { "import" };
-        result.push_str(&format!("// +{} adjacent {} lines\n", import_count - 1, label));
+        result.push_str(&format!(
+            "// +{} adjacent {} lines\n",
+            import_count - 1,
+            label
+        ));
     }
 
     result.trim_end().to_string()
@@ -660,6 +664,9 @@ fn main() {
         let input = "use a;\nuse b;\nuse c;\n\n\n\nfn x() {}\nfn y() {}\n\n\nfn z() {}";
         let r1 = compact_content(input, &Language::Rust);
         let r2 = compact_content(input, &Language::Rust);
-        assert_eq!(r1, r2, "compact_content must be deterministic for cache safety");
+        assert_eq!(
+            r1, r2,
+            "compact_content must be deterministic for cache safety"
+        );
     }
 }
